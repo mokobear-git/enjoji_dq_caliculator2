@@ -33,6 +33,18 @@
   details summary { cursor:pointer; font-weight:600; }
   .dates { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
   .dates span { font-size:.8rem; color:var(--sub); display:block; }
+  textarea { width:100%; padding:10px; font-size:1rem; border:1px solid var(--line); border-radius:8px;
+         background:var(--bg); color:var(--text); font-family:inherit; resize:vertical; }
+  .perr { color:#d1242f; font-size:.85rem; min-height:1.2em; margin-top:4px; }
+  h2 { font-size:.95rem; margin:0 0 8px; }
+  @media (max-width:420px) {
+    body { padding:12px; }
+    .row { grid-template-columns:4.6em 1fr 1fr 3.8em; gap:6px; font-size:.9rem; }
+    .row label { font-size:.82rem; }
+    .unit { font-size:.75rem; }
+    input[type=number] { padding:8px 4px; }
+    .dq { font-size:2.4rem; }
+  }
   .note { color:var(--sub); font-size:.8rem; }
 </style>
 </head>
@@ -51,7 +63,13 @@
   </div>
 
   <div class="card">
-    <div class="row head"><span>項目</span><span>歳</span><span>か月</span><span style="text-align:right">月齢</span></div>
+    <h2>一括入力</h2>
+    <textarea id="bulk" rows="3" placeholder="CA3-9、移動2-10、手2-4、習慣2-6、対人2-0、発語2-8、理解2-6" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+    <div class="perr" id="perr"></div>
+  </div>
+
+  <div class="card">
+    <div class="row head"><span>項目</span><span>歳</span><span>ヶ月</span><span style="text-align:right">月齢</span></div>
     <div id="rows"></div>
   </div>
 
@@ -83,7 +101,7 @@ ITEMS.forEach(it => {
   d.innerHTML =
     `<label for="${it.id}-y">${it.label}</label>
      <div class="cell"><input type="number" inputmode="numeric" min="0" max="20" step="1" id="${it.id}-y"><span class="unit">歳</span></div>
-     <div class="cell"><input type="number" inputmode="numeric" min="0" max="11" step="1" id="${it.id}-m"><span class="unit">か月</span></div>
+     <div class="cell"><input type="number" inputmode="numeric" min="0" max="11" step="1" id="${it.id}-m"><span class="unit">ヶ月</span></div>
      <div class="mon" id="${it.id}-t">—</div>`;
   rows.appendChild(d);
 });
@@ -102,20 +120,20 @@ function calc() {
   const vals = ITEMS.map(it => val(it.id));
   ITEMS.forEach((it, i) => {
     document.getElementById(it.id + '-t').textContent =
-      (vals[i] === null || Number.isNaN(vals[i])) ? '—' : vals[i] + 'か月';
+      (vals[i] === null || Number.isNaN(vals[i])) ? '—' : vals[i] + 'ヶ月';
   });
   const dqEl = document.getElementById('dq'), detail = document.getElementById('detail');
   dqEl.textContent = '—'; detail.textContent = ''; err.textContent = '';
 
-  if (vals.some(Number.isNaN)) { err.textContent = 'か月は0〜11の整数で入力'; return; }
+  if (vals.some(Number.isNaN)) { err.textContent = 'ヶ月は0〜11の整数で入力'; return; }
   if (vals.some(v => v === null)) return;
   const ca = vals[0];
-  if (ca <= 0) { err.textContent = '暦年齢は1か月以上で入力'; return; }
+  if (ca <= 0) { err.textContent = '暦年齢は1ヶ月以上で入力'; return; }
   const sum = vals.slice(1).reduce((a, b) => a + b, 0);
   const mean = sum / 6;
   const dq = mean / ca * 100;
   dqEl.textContent = dq.toFixed(1);
-  detail.textContent = `発達年齢合計 ${sum}か月 ÷ 6 = ${mean.toFixed(2)}か月（${Math.floor(mean/12)}歳${(mean%12).toFixed(1)}か月）／ CA ${ca}か月`;
+  detail.textContent = `発達年齢合計 ${sum}ヶ月 ÷ 6 = ${mean.toFixed(2)}ヶ月（${Math.floor(mean/12)}歳${(mean%12).toFixed(1)}ヶ月）／ CA ${ca}ヶ月`;
 }
 
 function fromDates() {
@@ -130,11 +148,68 @@ function fromDates() {
   calc();
 }
 
+const KEYS = [
+  ['ca',  ['CA','暦年齢','暦年令']],
+  ['mv',  ['移動運動','移動']],
+  ['hand',['手の運動','手']],
+  ['hab', ['基本的習慣','習慣']],
+  ['soc', ['対人関係','対人']],
+  ['sp',  ['発語']],
+  ['cmp', ['言語理解','理解']],
+];
+const SHORT = {ca:'CA', mv:'移動', hand:'手', hab:'習慣', soc:'対人', sp:'発語', cmp:'理解'};
+const norm = (t) => t
+  .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(/[Ａ-Ｚａ-ｚ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(/[－‐‑–—―−ー~〜]/g, '-');
+
+function parseBulk() {
+  const perr = document.getElementById('perr');
+  perr.textContent = '';
+  const t = norm(document.getElementById('bulk').value);
+  if (!t.trim()) return;
+  const names = KEYS.flatMap(([id, ns]) => ns.map(n => [n, id])).sort((a, b) => b[0].length - a[0].length);
+  const re = new RegExp('(' + names.map(n => n[0]).join('|') + ')\\s*[:：=]?\\s*(\\d+)\\s*-\\s*(\\d+)', 'gi');
+  const found = {}, bad = [];
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    const id = names.find(n => n[0].toLowerCase() === m[1].toLowerCase())[1];
+    const y = Number(m[2]), mo = Number(m[3]);
+    if (mo > 11) bad.push(`${SHORT[id]}: ヶ月は0〜11`);
+    found[id] = [y, mo];
+  }
+  KEYS.forEach(([id]) => {
+    if (found[id]) {
+      document.getElementById(id + '-y').value = found[id][0];
+      document.getElementById(id + '-m').value = found[id][1];
+    }
+  });
+  const missing = KEYS.filter(([id]) => !found[id]).map(([id]) => SHORT[id]);
+  const msgs = [...bad];
+  if (missing.length) msgs.push('未入力: ' + missing.join('・'));
+  perr.textContent = msgs.join(' / ');
+  calc();
+}
+
+function writeBulk() {
+  const parts = ITEMS.map(it => {
+    const y = document.getElementById(it.id + '-y').value, m = document.getElementById(it.id + '-m').value;
+    return (y === '' && m === '') ? null : `${SHORT[it.id]}${y || 0}-${m || 0}`;
+  });
+  document.getElementById('bulk').value = parts.every(p => p) ? parts.join('、') : '';
+  document.getElementById('perr').textContent = '';
+}
+
 document.addEventListener('input', e => {
-  if (e.target.id === 'birth' || e.target.id === 'test') fromDates(); else calc();
+  if (e.target.id === 'bulk') parseBulk();
+  else {
+    if (e.target.id === 'birth' || e.target.id === 'test') fromDates(); else calc();
+    writeBulk();
+  }
 });
 document.getElementById('reset').addEventListener('click', () => {
-  document.querySelectorAll('input').forEach(i => i.value = '');
+  document.querySelectorAll('input, textarea').forEach(i => i.value = '');
+  document.getElementById('perr').textContent = '';
   calc();
 });
 calc();
